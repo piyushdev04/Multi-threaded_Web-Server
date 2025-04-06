@@ -2,6 +2,10 @@
 
 this is a basic http web server built from scratch in c++ using sockets, threads, epoll, and a minimal frontend dashboard.
 
+## output
+
+![screenshot](output.png)
+
 ## features
 
 - multithreaded request handling  
