@@ -3,49 +3,125 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My C++ Web Server</title>
+    <title>Server Logs</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f4;
-            text-align: center;
-            padding: 50px;
-        }
-        h1 {
+        body{
+            font-family: sans-serif;
+            padding: 20px;
+            background: #f4f4f4;
             color: #333;
         }
-        p {
-            font-size: 18px;
-            color: #555;
+        h1{
+            font-family: 'Segoe UI', sans-serif; font-size: 2rem; color: #333; text-align: center; margin-top: 1rem;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: center;
         }
         button {
-            padding: 10px 20px;
-            font-size: 16px;
-            margin-top: 20px;
-            cursor: pointer;
-            background-color: #007BFF;
-            color: white;
-            border: none;
-            border-radius: 5px;
+            margin: 4px;
+            padding: 8px 12px;
         }
-        button:hover {
-            background-color: #0056b3;
+        .stats {
+            margin: 15px 0;
+        }
+        .toggle {
+            margin-bottom: 10px;
         }
     </style>
 </head>
 <body>
+    <h1>Multithreaded Web Server – Real-Time Logs</h1>
 
-    <h1>Welcome to My C++ Web Server 🚀</h1>
-    <p>This simple web server is powered by C++ and serves static files.</p>
+    <div class="stats">
+        <strong>Active Threads:</strong> <span id="threads">0</span><br>
+        <strong>Cache Hits:</strong> <span id="hits">0</span><br>
+        <strong>Misses:</strong> <span id="misses">0</span><br>
+        <strong>Last updated:</strong> <span id="updated">Never</span><br>
+    </div>
 
-    <button onclick="greet()">Click Me!</button>
-    <p id="message"></p>
+    <div class="toggle">
+        <button onclick="sendTestGet()">Test GET /</button>
+        <button onclick="sendTestPost()">Test POST /</button>
+        <button onclick="send404()">Test 404</button>
+        <button onclick="toggleRefresh()">
+            <span id="toggleLabel">Pause Auto-Refresh</span>
+        </button>
+    </div>
+
+    <table id="logTable">
+        <thead>
+            <tr>
+                <th>Client</th>
+                <th>Path</th>
+                <th>Thread</th>
+                <th>Time (ms)</th>
+                <th>Cache</th>
+            </tr>
+        </thead>
+        <tbody id="logBody">
+        </tbody>
+    </table>
 
     <script>
-        function greet() {
-            document.getElementById("message").innerText = "Hello, from your C++ Web Server!";
-        }
-    </script>
+        let autoRefresh = true;
 
+        function updateLogs() {
+            fetch('/logs')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById("threads").textContent = data.threadCount;
+                    document.getElementById("hits").textContent = data.cache.hit;
+                    document.getElementById("misses").textContent = data.cache.miss;
+                    document.getElementById("updated").textContent = new Date().toLocaleTimeString();
+
+                    const tbody = document.getElementById("logBody");
+                    tbody.innerHTML = "";
+                    (data.logs || []).reverse().forEach(log => {
+                        const row = `<tr>
+                            <td>${log.client}</td>
+                            <td>${log.path}</td>
+                            <td>${log.threadId}</td>
+                            <td>${log.responseTime}</td>
+                            <td>${log.cacheStatus}</td>
+                        </tr>`;
+                        tbody.insertAdjacentHTML("beforeend", row);
+                    });
+                });
+        }
+
+        setInterval(() => {
+            if (autoRefresh) updateLogs();
+        }, 2000);
+
+        function toggleRefresh() {
+            autoRefresh = !autoRefresh;
+            document.getElementById("toggleLabel").textContent = autoRefresh ? "Pause Auto-Refresh" : "Resume Auto-Refresh";
+        }
+
+        function sendTestGet() {
+            fetch("/").then(() => updateLogs());
+        }
+
+        function sendTestPost() {
+            fetch("/", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded"},
+                body: "username=test&message=Hello"
+            }).then(() => updateLogs());
+        }
+
+        function send404() {
+            fetch("/non-existent").then(() => updateLogs());
+        }
+
+        updateLogs();
+    </script>
 </body>
 </html>
