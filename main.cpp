@@ -10,13 +10,72 @@
 #include <unistd.h>
 #include <sys/epoll.h>
 #include <cstring>
+#include <mutex>
+#include <chrono>
+#include <nlohmann/json.hpp>
 
+using json = nlohmann::json;
 using namespace std;
 namespace fs = std::filesystem;
 
 const int PORT = 8080;
 const int MAX_EVENTS = 10;
 const string WEB_ROOT = "public/";
+
+struct LogEntry {
+    string clientIP;
+    string path;
+    size_t threadId;
+    long long responseTime;
+    string cacheStatus;
+};
+
+class Logger {
+    vector<LogEntry> logs;
+    int activeThreads = 0;
+    int cacheHit = 0, cacheMiss = 0;
+    mutex logMutex;
+
+public:
+    void addLog(const LogEntry& entry) {
+        lock_guard<mutex> lock(logMutex);
+        logs.push_back(entry);
+        if (logs.size() > 50) logs.erase(logs.begin());
+        if (entry.cacheStatus == "HIT") cacheHit++;
+        else cacheMiss++;
+    }
+
+    void threadStarted() {
+        lock_guard<mutex> lock(logMutex);
+        activeThreads++;
+    }
+
+    void threadEnded() {
+        lock_guard<mutex> lock(logMutex);
+        activeThreads--;
+    }
+
+    string getJson() {
+        lock_guard<mutex> lock(logMutex);
+        json root;
+        root["threadCount"] = activeThreads;
+        root["cache"] = { {"hit", cacheHit}, {"miss", cacheMiss} };
+
+        for (const auto& log : logs) {
+            root["logs"].push_back({
+                {"client", log.clientIP},
+                {"path", log.path},
+                {"threadId", log.threadId},
+                {"responseTime", log.responseTime},
+                {"cacheStatus", log.cacheStatus}
+            });
+        }
+
+        return root.dump(4);
+    }
+};
+
+Logger logger;
 
 string readFile(const string& filePath) {
     ifstream file(filePath);
@@ -43,44 +102,70 @@ unordered_map<string, string> parseRequest(const string& request) {
 }
 
 void handleClient(int clientSocket) {
-    char buffer[4096] = {0}; 
+    logger.threadStarted();
+    auto startTime = chrono::high_resolution_clock::now();
+
+    char buffer[4096] = {0};
     int bytesRead = read(clientSocket, buffer, sizeof(buffer));
     if (bytesRead <= 0) {
         close(clientSocket);
+        logger.threadEnded();
         return;
     }
 
     string request(buffer);
-    unordered_map<string, string> headers = parseRequest(request);
-
     istringstream reqStream(request);
     string method, path, httpVersion;
     reqStream >> method >> path >> httpVersion;
 
-    if (method == "POST") {  
-        size_t bodyPos = request.find("\r\n\r\n");  
-        if (bodyPos != string::npos) {
-            string postData = request.substr(bodyPos + 4);
-            string response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nReceived POST Data:\n" + postData;
-            send(clientSocket, response.c_str(), response.size(), 0);
-        }
+    if (path == "/logs") {
+        string jsonStr = logger.getJson();
+        string response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" + jsonStr;
+        send(clientSocket, response.c_str(), response.size(), 0);
         close(clientSocket);
+        logger.threadEnded();
         return;
     }
 
-    if (path == "/") path = "/index.html";  
-    string filePath = WEB_ROOT + path.substr(1);  
+    string cacheStatus = "MISS";
+    string filePath = WEB_ROOT + ((path == "/") ? "index.html" : path.substr(1));
+    string content;
 
-    string response;
-    if (fs::exists(filePath)) {
-        string content = readFile(filePath);
-        response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n" + content;
+    if (method == "POST") {
+        size_t bodyPos = request.find("\r\n\r\n");
+        string posData = (bodyPos != string::npos) ? request.substr(bodyPos + 4) : "";
+        content = "Recevived POST Data:\n" + posData;
+    } else if (fs::exists(filePath)){
+        content = readFile(filePath);
+        cacheStatus = "HIT";
     } else {
-        response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n<h1>404 Not Found</h1>";
+        content = "<h1>404 Not Found</h1>";
     }
+
+    string statusLine = (cacheStatus == "HIT" || method == "POST") ? "HTTP/1.1 200 OK\r\n" : "HTTP/1.1 404 Not Found\r\n";
+    
+    string contentType = "text/html";
+    string response = statusLine +
+                    "Content-Type: " + contentType + "\r\n" +
+                    "Content-Lenght: " + to_string(content.size()) + "\r\n" +
+                    "\r\n" + content;
 
     send(clientSocket, response.c_str(), response.size(), 0);
     close(clientSocket);
+
+    auto endTime = chrono::high_resolution_clock::now();
+    long long ms = chrono::duration_cast<chrono::milliseconds>(endTime - startTime).count();
+
+    LogEntry log = {
+        "client",
+        path,
+        hash<thread::id>{}(this_thread::get_id()),
+        ms,
+        cacheStatus
+    };
+    logger.addLog(log);
+
+    logger.threadEnded();
 }
 
 void startServer() {
@@ -120,7 +205,7 @@ void startServer() {
     epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &event);
 
     epoll_event events[MAX_EVENTS];
-    cout << "Server running on http://localhost:" << PORT << "\n";
+    cout << "Server running on http://localhost:" << PORT << "/n";
 
     while (true) {
         int event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
