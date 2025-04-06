@@ -21,7 +21,7 @@ this is a basic http web server built from scratch in c++ using sockets, threads
 ```bash
 g++ server.cpp -o server -lpthread
 ./server
-
+```
 ## license
 
 this project is licensed under the [MIT license](LICENSE).
