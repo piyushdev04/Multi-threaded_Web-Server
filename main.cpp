@@ -14,6 +14,7 @@
 #include <chrono>
 #include <nlohmann/json.hpp>
 
+
 using json = nlohmann::json;
 using namespace std;
 namespace fs = std::filesystem;
@@ -71,7 +72,7 @@ public:
             });
         }
 
-        return root.dump(4);
+        return root.dump(4); // return as string
     }
 };
 
@@ -133,9 +134,9 @@ void handleClient(int clientSocket) {
 
     if (method == "POST") {
         size_t bodyPos = request.find("\r\n\r\n");
-        string posData = (bodyPos != string::npos) ? request.substr(bodyPos + 4) : "";
-        content = "Recevived POST Data:\n" + posData;
-    } else if (fs::exists(filePath)){
+        string postData = (bodyPos != string::npos) ? request.substr(bodyPos + 4) : "";
+        content = "Received POST Data:\n" + postData;
+    } else if (fs::exists(filePath)) {
         content = readFile(filePath);
         cacheStatus = "HIT";
     } else {
@@ -143,12 +144,12 @@ void handleClient(int clientSocket) {
     }
 
     string statusLine = (cacheStatus == "HIT" || method == "POST") ? "HTTP/1.1 200 OK\r\n" : "HTTP/1.1 404 Not Found\r\n";
-    
+
     string contentType = "text/html";
     string response = statusLine +
-                    "Content-Type: " + contentType + "\r\n" +
-                    "Content-Lenght: " + to_string(content.size()) + "\r\n" +
-                    "\r\n" + content;
+                  "Content-Type: " + contentType + "\r\n" +
+                  "Content-Length: " + to_string(content.size()) + "\r\n" +
+                  "\r\n" + content;
 
     send(clientSocket, response.c_str(), response.size(), 0);
     close(clientSocket);
@@ -167,6 +168,7 @@ void handleClient(int clientSocket) {
 
     logger.threadEnded();
 }
+
 
 void startServer() {
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -205,7 +207,7 @@ void startServer() {
     epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &event);
 
     epoll_event events[MAX_EVENTS];
-    cout << "Server running on http://localhost:" << PORT << "/n";
+    cout << "Server running on http://localhost:" << PORT << "\n";
 
     while (true) {
         int event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
